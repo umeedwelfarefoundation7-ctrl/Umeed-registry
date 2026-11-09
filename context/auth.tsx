@@ -7,7 +7,11 @@ import React, {
   useCallback,
 } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { recordLoginAttempt, recordAuditLog, bulkCreateUsersInDb } from "@/lib/dataService";
+import {
+  recordLoginAttempt,
+  recordAuditLog,
+  bulkCreateUsersInDb,
+} from "@/lib/dataService";
 import type { Session, User } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -65,8 +69,8 @@ const REGISTERED_USERS_STORAGE_KEY = "befal_registered_users";
 const INITIAL_SUPER_ADMIN = {
   id: "usr-admin-001",
   email: "admin@umeed.org",
-  password: "Password123!",
-  fullName: "Dr. Hammad (Lead Administrator)",
+  password: "[PASSWORD]",
+  fullName: "Rauf Ahmed (Lead Administrator)",
   role: "super_admin",
   status: "active",
   department: "Executive Clinical Committee",
@@ -150,6 +154,8 @@ export function saveStoredAuthorizedUsers(users: any[]) {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+
+
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -359,18 +365,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Change Own Password ─────────────────────────────────────────────────────
   const changePassword = useCallback(
     async (newPassword: string, oldPassword?: string) => {
-      if (!user) return { success: false, error: "No active authenticated session." };
+      if (!user)
+        return { success: false, error: "No active authenticated session." };
       if (!newPassword || newPassword.length < 6) {
-        return { success: false, error: "New password must be at least 6 characters." };
+        return {
+          success: false,
+          error: "New password must be at least 6 characters.",
+        };
       }
 
       const email = user.email.toLowerCase();
       const stored = getStoredAuthorizedUsers();
-      const existingIndex = stored.findIndex((u) => u.email.toLowerCase() === email);
+      const existingIndex = stored.findIndex(
+        (u) => u.email.toLowerCase() === email,
+      );
 
       if (existingIndex >= 0) {
         if (oldPassword && stored[existingIndex].password !== oldPassword) {
-          return { success: false, error: "Current password does not match existing records." };
+          return {
+            success: false,
+            error: "Current password does not match existing records.",
+          };
         }
         stored[existingIndex].password = newPassword;
         saveStoredAuthorizedUsers(stored);
@@ -379,9 +394,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // If Supabase is connected, update Supabase auth password
       if (isSupabaseConfigured && session) {
         try {
-          const { error } = await supabase.auth.updateUser({ password: newPassword });
+          const { error } = await supabase.auth.updateUser({
+            password: newPassword,
+          });
           if (error) {
-            console.warn("Supabase auth password update notice:", error.message);
+            console.warn(
+              "Supabase auth password update notice:",
+              error.message,
+            );
           }
         } catch (err: any) {
           console.warn("Supabase password update exception:", err);
@@ -407,10 +427,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (payload: RegisterPayload) => {
       const normalized = payload.email.trim().toLowerCase();
       if (!normalized || !payload.fullName.trim()) {
-        return { success: false, error: "Authorized personnel name and email are required." };
+        return {
+          success: false,
+          error: "Authorized personnel name and email are required.",
+        };
       }
       if (!payload.password || payload.password.length < 6) {
-        return { success: false, error: "Account password/phrase must be at least 6 characters." };
+        return {
+          success: false,
+          error: "Account password/phrase must be at least 6 characters.",
+        };
       }
 
       const stored = getStoredAuthorizedUsers();
@@ -494,11 +520,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string, newPassword: string) => {
       const normalized = email.trim().toLowerCase();
       if (!newPassword || newPassword.length < 6) {
-        return { success: false, error: "New password must be at least 6 characters." };
+        return {
+          success: false,
+          error: "New password must be at least 6 characters.",
+        };
       }
 
       const stored = getStoredAuthorizedUsers();
-      const existingIndex = stored.findIndex((u) => u.email.toLowerCase() === normalized);
+      const existingIndex = stored.findIndex(
+        (u) => u.email.toLowerCase() === normalized,
+      );
 
       if (existingIndex >= 0) {
         stored[existingIndex].password = newPassword;
@@ -542,7 +573,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (isSupabaseConfigured) {
         try {
-          await supabase.from("users").update({ status }).eq("email", normalized);
+          await supabase
+            .from("users")
+            .update({ status })
+            .eq("email", normalized);
         } catch {
           // continue
         }
@@ -567,7 +601,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string) => {
       const normalized = email.trim().toLowerCase();
       const stored = getStoredAuthorizedUsers();
-      const filtered = stored.filter((u) => u.email.toLowerCase() !== normalized);
+      const filtered = stored.filter(
+        (u) => u.email.toLowerCase() !== normalized,
+      );
       saveStoredAuthorizedUsers(filtered);
 
       if (isSupabaseConfigured) {

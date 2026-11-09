@@ -304,7 +304,7 @@ export async function getUsersFromDb(isLive: boolean): Promise<DbUserRecord[]> {
     {
       id: "usr-admin-001",
       email: "admin@umeed.org",
-      full_name: "Dr. Hammad (Lead Administrator)",
+      full_name: "Rauf Ahmed (Lead Administrator)",
       role: "super_admin",
       status: "active",
       phone: "+92 300 1234567",
