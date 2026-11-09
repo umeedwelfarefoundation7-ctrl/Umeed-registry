@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Modal,
   btnSecondary,
@@ -16,18 +16,19 @@ import {
   InjectionItem,
   HistoryRecord,
 } from "@/data/mockData";
+import { checkSupabaseConnection, isSupabaseConfigured } from "@/lib/supabase";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/queryKeys";
 import {
-  getPatients,
-  getTreatments,
-  getInjections,
-  getHistory,
-  createPatientInDb,
-  updatePatientInDb,
-  deletePatientFromDb,
-  createTreatmentInDb,
-} from "@/lib/dataService";
-import { checkSupabaseConnection } from "@/lib/supabase";
-import { DB_CHANGE_EVENT } from "@/components/ui/LiveSync";
+  usePatientsQuery,
+  useTreatmentsQuery,
+  useInjectionsQuery,
+  useHistoryQuery,
+  useCreatePatientMutation,
+  useUpdatePatientMutation,
+  useDeletePatientMutation,
+  useCreateTreatmentMutation,
+} from "@/lib/hooks/useRegistryData";
 import {
   Database,
   RefreshCw,
@@ -58,68 +59,103 @@ const SETTINGS_VIEWS = [
 export default function AppHome() {
   const { activeView, setActiveView, selectedPatientId, setSelectedPatientId } = useNav();
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
 
-  // Connection & Data Loading State
-  const [isLiveDb, setIsLiveDb] = useState(false);
-  const [dataLoading, setDataLoading] = useState(true);
+  // Connection & Initial State (verified once on mount)
+  const [isLiveDb, setIsLiveDb] = useState(isSupabaseConfigured);
   const [showEmptyUploadModal, setShowEmptyUploadModal] = useState(false);
-
-  // Master State - Starts 100% empty (no dummy data)
-  const [patients, setPatients] = useState<PatientRecord[]>([]);
-  const [treatments, setTreatments] = useState<TreatmentRecord[]>([]);
-  const [injections, setInjections] = useState<InjectionItem[]>([]);
-  const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [editingPatient, setEditingPatient] = useState<PatientRecord | null>(null);
 
-  // Load Data: fetches only real data from database
-  const loadData = useCallback(async () => {
-    setDataLoading(true);
-    try {
-      const isConnected = await checkSupabaseConnection();
-      setIsLiveDb(isConnected);
-
-      if (isConnected) {
-        const [livePatients, liveTreatments, liveInjections, liveHistory] =
-          await Promise.all([
-            getPatients(true),
-            getTreatments(true),
-            getInjections(true),
-            getHistory(true),
-          ]);
-
-        setPatients(livePatients);
-        setTreatments(liveTreatments);
-        setInjections(liveInjections);
-        setHistory(liveHistory);
-      } else {
-        const liveInjections = await getInjections(false);
-        setPatients([]);
-        setTreatments([]);
-        setInjections(liveInjections);
-        setHistory([]);
-      }
-    } catch (err: any) {
-      console.error("Error loading registry data:", err);
-      setPatients([]);
-      setTreatments([]);
-      setHistory([]);
-    } finally {
-      setDataLoading(false);
-    }
+  useEffect(() => {
+    let mounted = true;
+    checkSupabaseConnection().then((connected) => {
+      if (mounted) setIsLiveDb(connected);
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // ── TanStack React Query: Centralized, Cached State ──
+  const {
+    data: patients = [],
+    isLoading: patientsLoading,
+    isFetching: patientsFetching,
+    refetch: refetchPatients,
+  } = usePatientsQuery(isLiveDb);
 
-  // ── Realtime live-sync: reload data when LiveSync fires a DB-change event ──
-  useEffect(() => {
-    const handleDbChange = () => {
-      loadData();
-    };
-    window.addEventListener(DB_CHANGE_EVENT, handleDbChange);
-    return () => window.removeEventListener(DB_CHANGE_EVENT, handleDbChange);
-  }, [loadData]);
+  const {
+    data: treatments = [],
+    isLoading: treatmentsLoading,
+    isFetching: treatmentsFetching,
+    refetch: refetchTreatments,
+  } = useTreatmentsQuery(isLiveDb);
+
+  const {
+    data: injections = [],
+    refetch: refetchInjections,
+  } = useInjectionsQuery(isLiveDb);
+
+  const {
+    data: history = [],
+    refetch: refetchHistory,
+  } = useHistoryQuery(isLiveDb);
+
+  // ── Mutations ──
+  const createPatientMutation = useCreatePatientMutation(isLiveDb);
+  const updatePatientMutation = useUpdatePatientMutation(isLiveDb);
+  const deletePatientMutation = useDeletePatientMutation(isLiveDb);
+  const createTreatmentMutation = useCreateTreatmentMutation(isLiveDb);
+
+  const dataLoading = patientsLoading || treatmentsLoading;
+  const isRefreshing = patientsFetching || treatmentsFetching;
+
+  // Manual Refresh Handler
+  const handleManualRefresh = useCallback(async () => {
+    await Promise.all([
+      refetchPatients(),
+      refetchTreatments(),
+      refetchInjections(),
+      refetchHistory(),
+    ]);
+  }, [refetchPatients, refetchTreatments, refetchInjections, refetchHistory]);
+
+  // Backward-compatible setters updating TanStack Query cache directly
+  const setPatients = useCallback(
+    (updater: PatientRecord[] | ((prev: PatientRecord[]) => PatientRecord[])) => {
+      queryClient.setQueryData<PatientRecord[]>(queryKeys.patients.all, (old = []) =>
+        typeof updater === "function" ? updater(old) : updater
+      );
+    },
+    [queryClient]
+  );
+
+  const setTreatments = useCallback(
+    (updater: TreatmentRecord[] | ((prev: TreatmentRecord[]) => TreatmentRecord[])) => {
+      queryClient.setQueryData<TreatmentRecord[]>(queryKeys.treatments.all, (old = []) =>
+        typeof updater === "function" ? updater(old) : updater
+      );
+    },
+    [queryClient]
+  );
+
+  const setInjections = useCallback(
+    (updater: InjectionItem[] | ((prev: InjectionItem[]) => InjectionItem[])) => {
+      queryClient.setQueryData<InjectionItem[]>(queryKeys.injections.all, (old = []) =>
+        typeof updater === "function" ? updater(old) : updater
+      );
+    },
+    [queryClient]
+  );
+
+  const setHistory = useCallback(
+    (updater: HistoryRecord[] | ((prev: HistoryRecord[]) => HistoryRecord[])) => {
+      queryClient.setQueryData<HistoryRecord[]>(queryKeys.history.all, (old = []) =>
+        typeof updater === "function" ? updater(old) : updater
+      );
+    },
+    [queryClient]
+  );
 
   // Patient Management Search & Filters
   const [patientSearch, setPatientSearch] = useState("");
@@ -129,21 +165,23 @@ export default function AppHome() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [deleteCandidate, setDeleteCandidate] = useState<PatientRecord | null>(null);
 
-  // Filtered Patients List
-  const filteredPatients = patients.filter((p) => {
-    if (filterDiag !== "all" && p.diagnosis !== filterDiag) return false;
-    if (filterSev !== "all" && p.severity !== filterSev) return false;
-    if (filterProv !== "all" && p.province !== filterProv) return false;
-    if (!patientSearch.trim()) return true;
-    const q = patientSearch.toLowerCase();
-    return (
-      p.patient_name.toLowerCase().includes(q) ||
-      p.registration_no.toLowerCase().includes(q) ||
-      (p.cnic && p.cnic.includes(q)) ||
-      (p.telephone && p.telephone.includes(q)) ||
-      (p.city && p.city.toLowerCase().includes(q))
-    );
-  });
+  // Filtered Patients List (Memoized to prevent unnecessary re-computations)
+  const filteredPatients = useMemo(() => {
+    return patients.filter((p) => {
+      if (filterDiag !== "all" && p.diagnosis !== filterDiag) return false;
+      if (filterSev !== "all" && p.severity !== filterSev) return false;
+      if (filterProv !== "all" && p.province !== filterProv) return false;
+      if (!patientSearch.trim()) return true;
+      const q = patientSearch.toLowerCase();
+      return (
+        p.patient_name.toLowerCase().includes(q) ||
+        p.registration_no.toLowerCase().includes(q) ||
+        (p.cnic && p.cnic.includes(q)) ||
+        (p.telephone && p.telephone.includes(q)) ||
+        (p.city && p.city.toLowerCase().includes(q))
+      );
+    });
+  }, [patients, filterDiag, filterSev, filterProv, patientSearch]);
 
   // Selected Patient for Details
   const activePatient =
@@ -152,39 +190,47 @@ export default function AppHome() {
   // Bulk Delete
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return;
-    for (const id of selectedIds) {
-      await deletePatientFromDb(id, isLiveDb);
+    try {
+      for (const id of selectedIds) {
+        await deletePatientMutation.mutateAsync(id);
+      }
+      addToast(
+        "info",
+        "Bulk Deletion",
+        `Removed ${selectedIds.length} selected patient records.`
+      );
+    } catch (err: any) {
+      addToast("error", "Bulk Deletion Error", err?.message || "Could not delete records.");
     }
-    setPatients((prev) => prev.filter((p) => !selectedIds.includes(p.patient_id)));
-    addToast(
-      "info",
-      "Bulk Deletion",
-      `Removed ${selectedIds.length} selected patient records.`
-    );
     setSelectedIds([]);
   };
 
   // Handle Patient Record Update
   const handlePatientUpdated = async (updatedP: PatientRecord) => {
-    const res = await updatePatientInDb(updatedP, isLiveDb);
-    if (res.success && res.data) {
-      setPatients((prev) =>
-        prev.map((p) => (p.patient_id === updatedP.patient_id ? res.data! : p))
-      );
-      addToast(
-        "success",
-        "Patient Profile Updated",
-        `${updatedP.registration_no} - ${updatedP.patient_name} changes saved to database.`
-      );
-    } else {
-      setPatients((prev) =>
-        prev.map((p) => (p.patient_id === updatedP.patient_id ? updatedP : p))
-      );
-      if (res.error) {
-        addToast("warning", "Saved Locally", `DB notice: ${res.error}`);
+    try {
+      const res = await updatePatientMutation.mutateAsync(updatedP);
+      if (res.success && res.data) {
+        addToast(
+          "success",
+          "Patient Profile Updated",
+          `${res.data.registration_no} - ${res.data.patient_name} changes saved to database.`
+        );
+      } else {
+        if (res.error) {
+          addToast(
+            "error",
+            "Database Notice",
+            `Saved locally. Cloud sync notice: ${res.error}`
+          );
+        }
       }
+      setEditingPatient(null);
+      return res;
+    } catch (err: any) {
+      addToast("error", "Update Failed", err?.message || "Could not update patient.");
+      setEditingPatient(null);
+      return { success: false, error: err?.message };
     }
-    setEditingPatient(null);
   };
 
   const handleStartEdit = (p: PatientRecord) => {
@@ -196,51 +242,72 @@ export default function AppHome() {
   // Single Delete Confirmation
   const confirmDeleteSingle = async () => {
     if (!deleteCandidate) return;
-    const res = await deletePatientFromDb(deleteCandidate.patient_id, isLiveDb);
-    if (res.success) {
-      setPatients((prev) =>
-        prev.filter((p) => p.patient_id !== deleteCandidate.patient_id)
-      );
-      addToast(
-        "info",
-        "Record Deleted",
-        `Patient ${deleteCandidate.registration_no} removed from registry.`
-      );
-    } else {
-      addToast("error", "Delete Failed", res.error || "Could not delete from database.");
+    try {
+      const res = await deletePatientMutation.mutateAsync(deleteCandidate.patient_id);
+      if (res.success) {
+        addToast(
+          "info",
+          "Record Deleted",
+          `Patient ${deleteCandidate.registration_no} removed from registry.`
+        );
+      } else {
+        addToast(
+          "error",
+          "Delete Failed",
+          res.error || "Could not delete from database."
+        );
+      }
+    } catch (err: any) {
+      addToast("error", "Delete Failed", err?.message || "Could not delete from database.");
     }
     setDeleteCandidate(null);
   };
 
   // Handle New Patient Enrollment
   const handlePatientCreated = async (newP: PatientRecord) => {
-    const res = await createPatientInDb(newP, isLiveDb);
-    if (res.success && res.data) {
-      setPatients((prev) => [res.data!, ...prev]);
-    } else {
-      setPatients((prev) => [newP, ...prev]);
-      if (res.error) {
-        addToast("warning", "Saved Locally", `DB notice: ${res.error}`);
+    try {
+      const res = await createPatientMutation.mutateAsync(newP);
+      if (res.success && res.data) {
+        setSelectedPatientId(res.data.patient_id);
+        addToast(
+          "success",
+          "Patient Registered Successfully",
+          `${res.data.registration_no} - ${res.data.patient_name} enrolled in database.`
+        );
+      } else {
+        if (res.error) {
+          addToast(
+            "error",
+            "Database Notice",
+            `Saved locally. Cloud sync notice: ${res.error}`
+          );
+        }
       }
+      return res;
+    } catch (err: any) {
+      addToast("error", "Enrollment Failed", err?.message || "Could not register patient.");
+      return { success: false, error: err?.message };
     }
   };
 
   // Handle New Treatment Infusion
   const handleTreatmentAdded = async (newT: TreatmentRecord) => {
-    const res = await createTreatmentInDb(newT, isLiveDb);
-    if (res.success && res.data) {
-      setTreatments((prev) => [res.data!, ...prev]);
-    } else {
-      setTreatments((prev) => [newT, ...prev]);
+    try {
+      const res = await createTreatmentMutation.mutateAsync(newT);
+      if (res.success && res.data) {
+        addToast("success", "Treatment Recorded", `Infusion successfully saved to database.`);
+      }
+    } catch (err: any) {
+      console.error("Treatment log error:", err);
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* â”€â”€ OFFLINE STATUS & SYNC QUEUE BANNER â”€â”€ */}
-      <OfflineBanner isLiveDb={isLiveDb} onSyncComplete={loadData} />
+      {/* ── OFFLINE STATUS & SYNC QUEUE BANNER ── */}
+      <OfflineBanner isLiveDb={isLiveDb} onSyncComplete={handleManualRefresh} />
 
-      {/* â”€â”€ LIVE DATABASE STATUS BANNER â”€â”€ */}
+      {/* ── LIVE DATABASE STATUS BANNER ── */}
       <div className="neu-card p-3 sm:px-4 sm:py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs border border-white/60 dark:border-[#3d1c43]/60">
         <div className="flex items-center gap-2.5">
           <div
@@ -261,21 +328,21 @@ export default function AppHome() {
 
         <div className="flex items-center gap-2.5">
           <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            {patients.length} Registered Patients Â· {treatments.length} Factor Infusions
+            {patients.length} Registered Patients · {treatments.length} Factor Infusions
           </span>
 
           <button
-            onClick={loadData}
+            onClick={handleManualRefresh}
             title="Refresh registry data"
-            disabled={dataLoading}
+            disabled={isRefreshing}
             className="neu-btn p-1.5 rounded-xl hover:text-[#EAAA00] transition-transform cursor-pointer disabled:opacity-50"
           >
-            <RefreshCw size={13} className={dataLoading ? "animate-spin text-[#EAAA00]" : ""} />
+            <RefreshCw size={13} className={isRefreshing ? "animate-spin text-[#EAAA00]" : ""} />
           </button>
         </div>
       </div>
 
-      {/* â”€â”€ EMPTY STATE FOR NEW REGISTRY (0 PATIENTS) â”€â”€ */}
+      {/* ── EMPTY STATE FOR NEW REGISTRY (0 PATIENTS) ── */}
       {patients.length === 0 && !dataLoading && activeView === "patients" && (
         <div className="neu-card p-10 text-center space-y-4 border border-dashed border-[#EAAA00]/40">
           <div className="w-14 h-14 rounded-2xl neu-inset mx-auto flex items-center justify-center text-[#EAAA00]">

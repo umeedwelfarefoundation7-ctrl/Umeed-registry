@@ -226,6 +226,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     ? { name: user.name, email: user.email, role: user.role }
     : null;
 
+  console.log(sessionUser);
   const isItemActive = useCallback(
     (item: NavItem) =>
       item.matches ? item.matches.includes(activeView) : activeView === item.id,

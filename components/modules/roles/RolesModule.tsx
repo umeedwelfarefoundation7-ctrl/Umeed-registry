@@ -38,6 +38,9 @@ import { getUsersFromDb, DbUserRecord } from "@/lib/dataService";
 import { useAuth } from "@/context/auth";
 import { formatPakistanPhone, validatePakistanPhone } from "@/lib/pakistanValidation";
 import ChangePasswordModal from "@/components/auth/ChangePasswordModal";
+import { useUsersQuery } from "@/lib/hooks/useRegistryData";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface RoleDef {
   id: string;
@@ -148,9 +151,9 @@ export default function RolesModule({ isLiveDb = true }: { isLiveDb?: boolean })
 
   const [selectedRole, setSelectedRole] = useState<RoleDef>(ROLES[0]);
 
-  // DB Users State
-  const [users, setUsers] = useState<DbUserRecord[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  // DB Users State via React Query
+  const queryClient = useQueryClient();
+  const { data: users = [], isLoading: loadingUsers, refetch: refetchUsers } = useUsersQuery(isLiveDb);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
 
@@ -187,20 +190,8 @@ export default function RolesModule({ isLiveDb = true }: { isLiveDb?: boolean })
   }, [currentLoggedInUser]);
 
   const loadUsers = async () => {
-    setLoadingUsers(true);
-    try {
-      const data = await getUsersFromDb(isLiveDb);
-      setUsers(data);
-    } catch {
-      // fallback
-    } finally {
-      setLoadingUsers(false);
-    }
+    await refetchUsers();
   };
-
-  useEffect(() => {
-    loadUsers();
-  }, [isLiveDb]);
 
   // Handle Generate Words Passphrase
   const handleGenerateWordsPassphrase = () => {
@@ -279,7 +270,7 @@ export default function RolesModule({ isLiveDb = true }: { isLiveDb?: boolean })
       setNewPhone("");
       setNewPassword("");
       setNewConfirmPassword("");
-      await loadUsers();
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
     } else {
       addToast("error", "Provisioning Failed", res.error || "Could not register account credentials.");
     }
@@ -290,8 +281,8 @@ export default function RolesModule({ isLiveDb = true }: { isLiveDb?: boolean })
     const nextStatus = userRecord.status === "active" ? "suspended" : "active";
     const res = await updateUserStatus(userRecord.email, nextStatus);
     if (res.success) {
-      setUsers((prev) =>
-        prev.map((u) => (u.email === userRecord.email ? { ...u, status: nextStatus } : u))
+      queryClient.setQueryData<DbUserRecord[]>(queryKeys.users.all, (old = []) =>
+        old.map((u) => (u.email === userRecord.email ? { ...u, status: nextStatus } : u))
       );
       addToast(
         "info",
@@ -316,7 +307,9 @@ export default function RolesModule({ isLiveDb = true }: { isLiveDb?: boolean })
 
     const res = await deleteUserAccount(userRecord.email);
     if (res.success) {
-      setUsers((prev) => prev.filter((u) => u.email !== userRecord.email));
+      queryClient.setQueryData<DbUserRecord[]>(queryKeys.users.all, (old = []) =>
+        old.filter((u) => u.email !== userRecord.email)
+      );
       addToast("info", "User Deauthorized", `Removed account for ${userRecord.full_name}.`);
     } else {
       addToast("error", "Delete Failed", res.error || "Could not remove user.");
@@ -951,7 +944,10 @@ export default function RolesModule({ isLiveDb = true }: { isLiveDb?: boolean })
         title="Bulk Upload Authorized Personnel (Excel / CSV)"
         isLiveDb={isLiveDb}
         onSuccess={(imported) => {
-          setUsers((prev) => [...imported, ...prev]);
+          queryClient.setQueryData<DbUserRecord[]>(queryKeys.users.all, (old = []) => [
+            ...imported,
+            ...old,
+          ]);
         }}
       />
 

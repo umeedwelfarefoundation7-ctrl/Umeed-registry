@@ -29,6 +29,14 @@ export default function TreatmentTable({
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
 
+  // Pagination State (25 rows default)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [search, patientId]);
+
   const filtered = treatments
     .filter((t) => (patientId ? t.patient_id === patientId : true))
     .filter((t) => {
@@ -43,6 +51,12 @@ export default function TreatmentTable({
     });
 
   const totalIu = filtered.reduce((acc, t) => acc + (t.dose_iu || 0), 0);
+
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const paginatedTreatments = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
 
   return (
     <>
@@ -98,7 +112,7 @@ export default function TreatmentTable({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((t) => (
+              {paginatedTreatments.map((t) => (
                 <tr
                   key={t.id}
                   className="border-t border-slate-200/50 dark:border-[#2d1433] hover:bg-white/40 dark:hover:bg-[#251229]/40 transition-colors"
@@ -154,6 +168,82 @@ export default function TreatmentTable({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Bar */}
+        {filtered.length > 0 && (
+          <div className="pt-4 flex flex-wrap items-center justify-between gap-3 text-xs border-t border-slate-200/60 dark:border-[#2d1433]/60">
+            <div className="text-slate-500 dark:text-slate-400">
+              Showing{" "}
+              <span className="font-semibold text-[#3A0F34] dark:text-[#f6f1f7]">
+                {(currentPage - 1) * pageSize + 1}
+              </span>{" "}
+              to{" "}
+              <span className="font-semibold text-[#3A0F34] dark:text-[#f6f1f7]">
+                {Math.min(currentPage * pageSize, filtered.length)}
+              </span>{" "}
+              of{" "}
+              <span className="font-semibold text-[#3A0F34] dark:text-[#f6f1f7]">
+                {filtered.length}
+              </span>{" "}
+              infusions
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 mr-2">
+                <span className="text-slate-500">Rows:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="neu-inset px-2 py-1 rounded-lg bg-transparent text-xs text-[#3A0F34] dark:text-[#f6f1f7] cursor-pointer"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(1)}
+                className="neu-btn px-2.5 py-1 rounded-lg font-semibold disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+              >
+                &laquo; First
+              </button>
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="neu-btn px-2.5 py-1 rounded-lg font-semibold disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+              >
+                &lsaquo; Prev
+              </button>
+              <span className="px-2 text-slate-600 dark:text-slate-300 font-semibold">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="neu-btn px-2.5 py-1 rounded-lg font-semibold disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+              >
+                Next &rsaquo;
+              </button>
+              <button
+                type="button"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(totalPages)}
+                className="neu-btn px-2.5 py-1 rounded-lg font-semibold disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+              >
+                Last &raquo;
+              </button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Universal Bulk Upload Modal for Treatments */}

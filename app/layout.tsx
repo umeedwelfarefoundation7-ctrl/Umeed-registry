@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title: "UMEED — Hemophilia Registry & Clinical Intelligence",
   description:
     "Production-ready soft-neumorphic application for clinical hemophilia registries, factor treatment tracking, batch spreadsheet processing, and role-based intelligence.",
-  keywords: ["UMEED", "BEFAL", "Neumorphism", "Hemophilia Registry", "PHPWS", "Clinical Intelligence"],
+  keywords: ["UMEED", "Hemophilia Registry", "PHPWS", "Clinical Intelligence"],
   icons: {
     icon: [
       { url: "/logo.png", type: "image/png" },

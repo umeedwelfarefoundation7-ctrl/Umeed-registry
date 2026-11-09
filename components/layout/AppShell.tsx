@@ -14,6 +14,7 @@ import Image from "next/image";
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
+ 
 
   if (loading) {
     return (

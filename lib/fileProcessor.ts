@@ -63,7 +63,7 @@ export const PATIENT_COLUMNS: ColumnDefinition[] = [
   { key: "other_vaccinations", label: "Other Vaccinations", required: false, example: "" },
   { key: "joint_deformity", label: "Joint Deformity", required: false, example: "Mild" },
   { key: "activity_level", label: "Activity Level", required: false, example: "Moderate" },
-  { key: "filled_by", label: "Form Filled By (Operator)", required: false, example: "Dr. Hammad" },
+  { key: "filled_by", label: "Form Filled By (Operator)", required: false, example: "Rauf Ahmed" },
   { key: "designation", label: "Operator Designation", required: false, example: "Clinician" },
   { key: "organization", label: "Operator Organization", required: false, example: "PHPWS" },
   { key: "comments", label: "Clinical Notes / Comments", required: false, example: "Active registry profile" },
@@ -91,7 +91,7 @@ export const INJECTION_COLUMNS: ColumnDefinition[] = [
 
 export const USER_COLUMNS: ColumnDefinition[] = [
   { key: "email", label: "Work Email", required: true, example: "doctor@umeed.org" },
-  { key: "full_name", label: "Full Name", required: true, example: "Dr. Hammad Tariq" },
+  { key: "full_name", label: "Full Name", required: true, example: "Rauf Ahmed" },
   { key: "role", label: "Role (super_admin/admin/manager/clinician)", required: true, example: "clinician" },
   { key: "status", label: "Status (active/inactive/suspended/pending)", required: false, example: "active" },
   { key: "phone", label: "Phone", required: false, example: "0321-9876543" },

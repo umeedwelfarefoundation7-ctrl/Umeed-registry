@@ -83,6 +83,7 @@ export default function LoginPage() {
       setLoading(true);
       const result = await signIn(email, password);
       setLoading(false);
+    
 
       if (result.error) {
         setError(result.error);

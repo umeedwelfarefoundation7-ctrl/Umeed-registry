@@ -59,10 +59,33 @@ export default function PatientForm({
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
 
+  // Helper to compute next H-# from existing patients list
+  const getNextAvailableRegNo = (pts: PatientRecord[] = patients): string => {
+    let max = 0;
+    for (const p of pts) {
+      if (p.registration_no) {
+        const match = p.registration_no.match(/(\d+)/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (n > max && n < 1000000) max = n;
+        }
+      }
+    }
+    return `H-${max + 1}`;
+  };
+
+  const [regMode, setRegMode] = useState<"auto" | "manual">(() => {
+    return initialData ? "manual" : "auto";
+  });
+
   const [v, setV] = useState<Record<string, any>>(() => {
+    const defaultRegNo =
+      initialData?.registration_no || getNextAvailableRegNo(patients);
+
     if (initialData) {
       return {
         ...initialData,
+        registration_no: defaultRegNo,
         household_other_bleeder:
           initialData.household_other_bleeder === true ||
           initialData.household_other_bleeder === "yes" ||
@@ -89,6 +112,7 @@ export default function PatientForm({
               : "Clinical Officer";
 
     return {
+      registration_no: defaultRegNo,
       record_date: today(),
       gender: "Male",
       marital_status: "Single",
@@ -287,7 +311,10 @@ export default function PatientForm({
     const phoneRand = Math.floor(1000000 + Math.random() * 9000000);
     const validPhone = `+92 300 ${phoneRand}`;
 
+    const dummyRegNo = v.registration_no || getNextAvailableRegNo(patients);
+
     const dummy: Record<string, any> = {
+      registration_no: dummyRegNo,
       patient_name: pick.name,
       date_of_birth: pick.dob,
       gender: pick.gender,
@@ -335,8 +362,7 @@ export default function PatientForm({
             : user?.role === "manager"
               ? "HTC Manager"
               : "Staff Clinician",
-      organization:
-        user?.department || "Umeed welfare foundation",
+      organization: user?.department || "Umeed welfare foundation",
       comments:
         "Automated test enrollment dummy data for verifying database synchronization and API upload.",
     };
@@ -437,7 +463,7 @@ export default function PatientForm({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!v.patient_name || v.patient_name.trim().length < 2) {
       addToast(
@@ -512,14 +538,39 @@ export default function PatientForm({
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
+    try {
+      // Determine final registration number (supports auto H-#, custom H#1, etc.)
+      const manualInput = (v.registration_no || "").trim();
+      const finalRegNo =
+        manualInput ||
+        initialData?.registration_no ||
+        getNextAvailableRegNo(patients);
+
+      // Verify uniqueness across other patients in registry
+      const isDuplicate = patients.some(
+        (p) =>
+          p.patient_id !== initialData?.patient_id &&
+          p.registration_no &&
+          p.registration_no.trim().toLowerCase() === finalRegNo.toLowerCase(),
+      );
+
+      if (isDuplicate) {
+        addToast(
+          "error",
+          "Duplicate Registration Number",
+          `Registration number "${finalRegNo}" is already assigned to another patient. Please choose a unique Hospital ID.`,
+        );
+        setIsSubmitting(false);
+        setExpandedSections((prev) => ({ ...prev, Personal: true }));
+        return;
+      }
+
       const generatedId =
         initialData?.patient_id || Math.floor(Math.random() * 800) + 200;
-      const regNo = initialData?.registration_no || `H-${generatedId}`;
 
       const newRecord: PatientRecord = {
         patient_id: generatedId,
-        registration_no: regNo,
+        registration_no: finalRegNo,
         patient_name: v.patient_name.trim(),
         date_of_birth: v.date_of_birth || null,
         age: v.date_of_birth
@@ -592,28 +643,30 @@ export default function PatientForm({
           v.designation ||
           (user?.role === "super_admin" ? "Lead Administrator" : "Clinician"),
         organization:
-          v.organization ||
-          user?.department ||
-          "Umeed welfare foundation",
+          v.organization || user?.department || "Umeed welfare foundation",
         comments: v.comments || "",
         status: "active",
       };
-// hell
+
       if (onSuccess) {
-        onSuccess(newRecord);
+        const res: any = await onSuccess(newRecord);
+        if (res && res.success === false) {
+          setIsSubmitting(false);
+          return;
+        }
       }
 
       setIsSubmitting(false);
-      addToast(
-        "success",
-        initialData
-          ? "Patient Profile Updated"
-          : "Patient Registered Successfully",
-        `${newRecord.registration_no} - ${newRecord.patient_name} has been enrolled in the registry.`,
-      );
       setSelectedPatientId(newRecord.patient_id);
       setActiveView("patients");
-    }, 350);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      addToast(
+        "error",
+        "Save Failed",
+        err?.message || "An unexpected error occurred while saving.",
+      );
+    }
   };
 
   return (
@@ -815,6 +868,138 @@ export default function PatientForm({
               {/* Accordion Body */}
               {isExpanded && (
                 <div className="p-5 border-t border-white/50 dark:border-[#38163f]/60 space-y-4 animate-in fade-in duration-200">
+                  {/* Registration Number (H-# / Hospital ID) Configuration */}
+                  {s.title === "Personal" && (
+                    <div className="p-4 rounded-2xl neu-inset border border-[#EAAA00]/40 space-y-3 bg-[#EAAA00]/5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">🏷️</span>
+                          <div>
+                            <h4 className="text-xs font-bold text-[#3A0F34] dark:text-[#f6f1f7] uppercase tracking-wider">
+                              Hospital Registration ID (Reg # / H-#)
+                            </h4>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Generate automatically (e.g.{" "}
+                              <span className="font-mono font-semibold text-[#EAAA00]">
+                                {getNextAvailableRegNo(patients)}
+                              </span>
+                              ) or maintain manually (e.g.{" "}
+                              <span className="font-mono font-semibold text-[#EAAA00]">
+                                H#1
+                              </span>
+                              ,{" "}
+                              <span className="font-mono font-semibold text-[#EAAA00]">
+                                H-101
+                              </span>
+                              ).
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Mode Switch: Auto vs Manual */}
+                        <div className="flex items-center gap-1 neu-card p-1 rounded-xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRegMode("auto");
+                              set("registration_no", getNextAvailableRegNo(patients));
+                            }}
+                            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                              regMode === "auto"
+                                ? "bg-[#EAAA00] text-[#190617] shadow-sm"
+                                : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+                            }`}
+                          >
+                            ⚡ Auto Assign
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRegMode("manual")}
+                            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                              regMode === "manual"
+                                ? "bg-[#EAAA00] text-[#190617] shadow-sm"
+                                : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+                            }`}
+                          >
+                            ✍️ Manual / Edit
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid sm:grid-cols-2 gap-3 items-center pt-1">
+                        <div>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              className={`${inputCls} font-mono font-bold text-sm tracking-wide ${
+                                regMode === "manual"
+                                  ? "border-emerald-500/50 focus:border-[#EAAA00]"
+                                  : "border-[#EAAA00]/40"
+                              }`}
+                              value={v.registration_no ?? ""}
+                              onChange={(e) => {
+                                setRegMode("manual");
+                                set("registration_no", e.target.value);
+                              }}
+                              placeholder="e.g. H#1, H-1, UWF-001..."
+                              required
+                            />
+                            <span
+                              className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md pointer-events-none ${
+                                regMode === "auto"
+                                  ? "text-[#EAAA00] bg-[#EAAA00]/10"
+                                  : "text-emerald-600 bg-emerald-500/10"
+                              }`}
+                            >
+                              {regMode === "auto"
+                                ? "Auto Generated"
+                                : "Manual / Custom"}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                            Editable clinical registration identifier. You can change or overwrite this record number anytime.
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextVal = getNextAvailableRegNo(patients);
+                              setRegMode("auto");
+                              set("registration_no", nextVal);
+                              addToast(
+                                "info",
+                                "Auto Generated",
+                                `Registration # set to ${nextVal}`,
+                              );
+                            }}
+                            className="neu-btn px-3 py-2 rounded-xl text-xs font-bold text-[#3A0F34] dark:text-[#f6f1f7] hover:text-[#EAAA00] flex items-center gap-1.5 cursor-pointer"
+                            title="Auto-calculate next sequential number from database"
+                          >
+                            <span>🔄 Auto Next ({getNextAvailableRegNo(patients)})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRegMode("manual");
+                              const count = (patients?.length || 0) + 1;
+                              set("registration_no", `H#${count}`);
+                              addToast(
+                                "info",
+                                "Format Applied",
+                                `Set Registration # to H#${count}`,
+                              );
+                            }}
+                            className="neu-btn px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-[#EAAA00] cursor-pointer"
+                            title="Format as H#1 style"
+                          >
+                            <span>Apply &ldquo;H#&rdquo; Format</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {s.title === "Form details" && (
                     <div className="neu-inset p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
                       <div className="flex items-center gap-2">

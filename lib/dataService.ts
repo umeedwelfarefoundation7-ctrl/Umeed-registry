@@ -87,7 +87,8 @@ export function mapRowToPatient(row: any): PatientRecord {
     baseline_factor_activity: factor || 1.0,
     diagnostic_reason: row.diagnostic_reason || "Bleeding symptoms",
     diagnostic_reason_other: row.diagnostic_reason_other || "",
-    age_first_diagnosed: row.age_first_diagnosed != null ? Number(row.age_first_diagnosed) : null,
+    age_first_diagnosed:
+      row.age_first_diagnosed != null ? Number(row.age_first_diagnosed) : null,
     severity: (row.severity as any) || calculatedSeverity,
     treatment_type: row.treatment_type || "On-demand",
     inhibitor_status: row.inhibitor_status || "Negative",
@@ -133,6 +134,12 @@ export function mapRowToTreatment(row: any): TreatmentRecord {
   };
 }
 
+const PATIENT_SELECT_COLUMNS =
+  "patient_id, registration_no, patient_name, date_of_birth, age, gender, marital_status, cnic, blood_group, record_date, qualification, profession, job_title, address, city, city_town, province, telephone, emergency_number, email, guardian_name, guardian_cnic, household_other_bleeder, household_patient_name, household_relation, diagnosis, registered_with_chapter, chapter_name, diagnostic_technique, diagnostic_other, baseline_factor_activity, diagnostic_reason, diagnostic_reason_other, age_first_diagnosed, severity, treatment_type, inhibitor_status, bleeding_episodes_12m, treatment_products, hcv, hiv, hbv, vaccinations, other_vaccinations, joint_deformity, activity_level, filled_by, designation, organization, comments, created_at, updated_at";
+
+const TREATMENT_SELECT_COLUMNS =
+  "id, patient_id, injection_id, treatment_date, reason, medication, dose_iu, comments, created_at, patients(registration_no, patient_name), injections(name)";
+
 /**
  * Fetch all patients from Supabase. No dummy data.
  */
@@ -143,13 +150,13 @@ export async function getPatients(isLive: boolean): Promise<PatientRecord[]> {
   try {
     const { data, error } = await supabase
       .from("patients_view")
-      .select("*")
+      .select(PATIENT_SELECT_COLUMNS)
       .order("patient_id", { ascending: false });
 
     if (error) {
       const { data: tableData, error: tableErr } = await supabase
         .from("patients")
-        .select("*")
+        .select(PATIENT_SELECT_COLUMNS)
         .order("patient_id", { ascending: false });
       if (tableErr) return [];
       return (tableData || []).map(mapRowToPatient);
@@ -173,7 +180,9 @@ export async function getTreatments(
   try {
     const { data, error } = await supabase
       .from("treatments")
-      .select("*, patients(registration_no, patient_name), injections(name)")
+      .select(
+        "id, patient_id, injection_id, treatment_date, reason, medication, dose_iu, comments, created_at, patients(registration_no, patient_name), injections(name)",
+      )
       .order("treatment_date", { ascending: false });
 
     if (error) return [];
@@ -194,7 +203,7 @@ export async function getInjections(isLive: boolean): Promise<InjectionItem[]> {
   try {
     const { data, error } = await supabase
       .from("injections")
-      .select("*")
+      .select("id, name, type, strength, is_active")
       .order("id", { ascending: true });
 
     if (error || !data || data.length === 0) return INITIAL_INJECTIONS;
@@ -221,12 +230,16 @@ export async function getHistory(isLive: boolean): Promise<HistoryRecord[]> {
     const [impRes, expRes] = await Promise.all([
       supabase
         .from("import_history")
-        .select("*")
+        .select(
+          "id, filename, format, records_count, success_count, failed_count, status, operator, created_at",
+        )
         .order("created_at", { ascending: false })
         .limit(25),
       supabase
         .from("export_history")
-        .select("*")
+        .select(
+          "id, filename, format, records_count, status, operator, created_at",
+        )
         .order("created_at", { ascending: false })
         .limit(25),
     ]);
@@ -378,6 +391,18 @@ function buildPatientPayload(p: any, fallbackName = "Unnamed Patient") {
       ? String(rawName).trim()
       : fallbackName;
 
+  // Hospital / Registration number handling (supports custom assignment like H#1, H-1, etc.)
+  const rawReg =
+    p.registration_no ||
+    p["Registration No"] ||
+    p["Registration"] ||
+    p["Reg #"] ||
+    p["H-#"] ||
+    p["Hospital #"] ||
+    p["Hospital ID"];
+  const regNoVal =
+    rawReg && String(rawReg).trim() !== "" ? String(rawReg).trim() : null;
+
   const rawCnic = p.cnic || p["CNIC"] || p["cnic"];
   const cnicVal =
     rawCnic && String(rawCnic).trim() !== ""
@@ -391,7 +416,8 @@ function buildPatientPayload(p: any, fallbackName = "Unnamed Patient") {
       ? formatCNIC(String(rawGuardianCnic).trim())
       : null;
 
-  const rawPhone = p.telephone || p["Telephone"] || p["Phone"] || p["telephone"];
+  const rawPhone =
+    p.telephone || p["Telephone"] || p["Phone"] || p["telephone"];
   const phoneVal =
     rawPhone && String(rawPhone).trim() !== ""
       ? formatPakistanPhone(String(rawPhone).trim())
@@ -417,14 +443,17 @@ function buildPatientPayload(p: any, fallbackName = "Unnamed Patient") {
   let vaccinationsArray: string[] | null = null;
   if (Array.isArray(p.vaccinations)) {
     vaccinationsArray = p.vaccinations;
-  } else if (typeof p.vaccinations === "string" && p.vaccinations.trim() !== "") {
+  } else if (
+    typeof p.vaccinations === "string" &&
+    p.vaccinations.trim() !== ""
+  ) {
     vaccinationsArray = p.vaccinations
       .split(",")
       .map((s: string) => s.trim())
       .filter(Boolean);
   }
 
-  return {
+  const payload: any = {
     patient_name: patientName,
     date_of_birth: p.date_of_birth || null,
     gender: p.gender || "Male",
@@ -483,6 +512,12 @@ function buildPatientPayload(p: any, fallbackName = "Unnamed Patient") {
     organization: p.organization || null,
     comments: p.comments || null,
   };
+
+  if (regNoVal) {
+    payload.registration_no = regNoVal;
+  }
+
+  return payload;
 }
 
 /**
@@ -526,10 +561,17 @@ export async function updatePatientInDb(
   }
 
   try {
-    const payload = {
+    const rawReg = p.registration_no;
+    const regNoVal =
+      rawReg && String(rawReg).trim() !== "" ? String(rawReg).trim() : null;
+
+    const payload: any = {
       ...buildPatientPayload(p, p.patient_name || "Updated Patient"),
       updated_at: new Date().toISOString(),
     };
+    if (regNoVal) {
+      payload.registration_no = regNoVal;
+    }
 
     const { data, error } = await supabase
       .from("patients")
@@ -593,7 +635,9 @@ export async function bulkCreatePatientsInDb(
       patient_id: p.patient_id || Date.now() + idx,
       registration_no: p.registration_no || `H-${Date.now() + idx}`,
       patient_name:
-        p.patient_name || (p as any)["Patient Full Name"] || `Patient ${idx + 1}`,
+        p.patient_name ||
+        (p as any)["Patient Full Name"] ||
+        `Patient ${idx + 1}`,
       date_of_birth: p.date_of_birth || "2000-01-01",
       age: p.age || 25,
       gender: p.gender || "Male",
@@ -684,7 +728,7 @@ export async function bulkCreateTreatmentsInDb(
     const { data, error } = await supabase
       .from("treatments")
       .insert(payloads)
-      .select("*, patients(registration_no, patient_name), injections(name)");
+      .select(TREATMENT_SELECT_COLUMNS);
 
     if (error) throw error;
     const mapped = (data || []).map(mapRowToTreatment);
@@ -957,7 +1001,7 @@ export async function createTreatmentInDb(
     const { data, error } = await supabase
       .from("treatments")
       .insert([payload])
-      .select("*, patients(registration_no, patient_name), injections(name)")
+      .select(TREATMENT_SELECT_COLUMNS)
       .single();
     if (error) throw error;
     return { success: true, data: mapRowToTreatment(data) };
